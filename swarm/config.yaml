@@ -33,8 +33,8 @@ google:
   # gws: npm install -g @googleworkspace/cli → gws auth setup
 
   dashboard:
-    enabled: false            # true にしたら Sheets 同期が有効になる
-    spreadsheet_id: ""        # Google Sheets ID (URLの /d/ と /edit の間)
+    enabled: true
+    spreadsheet_id: ""        # ← ここにSpreadsheet IDを貼る（URLの /d/ と /edit の間）
     sheets:
       projects: "Projects"    # プロジェクト一覧タブ
       active: "Active"        # アクティブタスクタブ
@@ -42,7 +42,7 @@ google:
       proposals: "Skills"     # スキル化提案タブ
 
   drive:
-    enabled: false
+    enabled: true
     # プロジェクトごとに paths.drive で指定
 
 # ------------------------------------------------------------
