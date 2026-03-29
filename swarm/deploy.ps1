@@ -1,275 +1,230 @@
 <#
 .SYNOPSIS
-    AI Swarm deployment script for psmux (Windows native tmux)
+    AI Swarm - Team deployment script for psmux
 
 .DESCRIPTION
-    Creates a psmux session with Router + Worker Pool architecture.
-    Equivalent to shutsujin_departure.sh but for the swarm pattern.
+    Deploys one or more AI swarm teams as psmux sessions.
+    Each team = 1 Router + 5 Workers.
 
-.PARAMETER Formation
-    Deployment formation: default, battle, lean
+.PARAMETER Teams
+    Team names to deploy (e.g., dev, design, article)
+
+.PARAMETER All
+    Deploy all defined teams
+
+.PARAMETER Battle
+    All agents use Opus (full power mode)
 
 .PARAMETER Clean
-    Reset task board and results before starting
+    Reset boards and results before starting
 
 .PARAMETER SetupOnly
-    Create psmux session only (don't launch Claude Code)
+    Create sessions only, don't launch Claude Code
 
 .EXAMPLE
-    ./deploy.ps1                    # Default formation
-    ./deploy.ps1 -Formation battle  # All Opus
-    ./deploy.ps1 -Clean             # Fresh start
-    ./deploy.ps1 -SetupOnly         # Manual Claude launch
+    ./deploy.ps1 dev                    # Dev team only
+    ./deploy.ps1 dev article            # Dev + Article teams
+    ./deploy.ps1 dev -Battle            # Dev team, all Opus
+    ./deploy.ps1 -All                   # All teams
+    ./deploy.ps1 -All -Battle           # All teams, all Opus
+    ./deploy.ps1 dev -Clean             # Dev team, fresh board
+    ./deploy.ps1 -All -SetupOnly        # All sessions, no Claude
 #>
 
 param(
-    [ValidateSet("default", "battle", "lean")]
-    [string]$Formation = "default",
+    [Parameter(Position = 0, ValueFromRemainingArguments)]
+    [string[]]$Teams,
 
+    [switch]$All,
+    [switch]$Battle,
     [switch]$Clean,
     [switch]$SetupOnly
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-Set-Location $ScriptDir\..
+Set-Location "$ScriptDir\.."
+
+$WorkersPerTeam = 5
 
 # ============================================================
-# Load configuration
+# Discover available teams
 # ============================================================
-# Simple YAML parser for config (powershell-yaml module or manual)
-$config = @{
-    session = "swarm"
-    router = @{ model = "opus"; thinking = $false }
-    pools = @{
-        code     = @{ model = "sonnet"; workers = 2; persona = "Senior Software Engineer" }
-        docs     = @{ model = "sonnet"; workers = 1; persona = "Technical Writer" }
-        research = @{ model = "sonnet"; workers = 1; persona = "Research Analyst" }
+$AvailableTeams = Get-ChildItem "swarm/teams/*.yaml" | ForEach-Object { $_.BaseName }
+
+if ($All) {
+    $Teams = $AvailableTeams
+} elseif (-not $Teams -or $Teams.Count -eq 0) {
+    Write-Host ""
+    Write-Host "  Usage: ./deploy.ps1 <team> [team2] [options]" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Available teams:" -ForegroundColor White
+    foreach ($t in $AvailableTeams) {
+        Write-Host "    - $t" -ForegroundColor Gray
+    }
+    Write-Host ""
+    Write-Host "  Options:" -ForegroundColor White
+    Write-Host "    -All        Deploy all teams" -ForegroundColor Gray
+    Write-Host "    -Battle     All Opus mode" -ForegroundColor Gray
+    Write-Host "    -Clean      Reset boards" -ForegroundColor Gray
+    Write-Host "    -SetupOnly  No Claude launch" -ForegroundColor Gray
+    Write-Host ""
+    exit 0
+}
+
+# Validate team names
+foreach ($t in $Teams) {
+    if ($t -notin $AvailableTeams) {
+        Write-Host "  Error: Unknown team '$t'" -ForegroundColor Red
+        Write-Host "  Available: $($AvailableTeams -join ', ')" -ForegroundColor Gray
+        exit 1
     }
 }
 
-# Apply formation overrides
-switch ($Formation) {
-    "battle" {
-        $config.router.thinking = $true
-        $config.pools.code.model = "opus"; $config.pools.code.workers = 4
-        $config.pools.docs.model = "opus"; $config.pools.docs.workers = 2
-        $config.pools.research.model = "opus"; $config.pools.research.workers = 2
-    }
-    "lean" {
-        $config.router.model = "sonnet"
-        $config.pools.code.workers = 1
-        $config.pools.docs.model = "haiku"; $config.pools.docs.workers = 1
-        $config.pools.research.model = "haiku"; $config.pools.research.workers = 1
-    }
-}
-
-$SessionName = $config.session
+# Model selection
+$RouterModel = "opus"
+$WorkerModel = if ($Battle) { "opus" } else { "sonnet" }
+$RouterThinking = if ($Battle) { "" } else { "MAX_THINKING_TOKENS=0 " }
+$FormationLabel = if ($Battle) { "BATTLE (All Opus)" } else { "Default (Router:Opus / Workers:Sonnet)" }
 
 # ============================================================
 # Banner
 # ============================================================
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║  AI SWARM - Router + Worker Pool                ║" -ForegroundColor Cyan
-Write-Host "  ║  Formation: $($Formation.PadRight(38))║" -ForegroundColor Cyan
-Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "  ║  AI SWARM - Team Deployment                         ║" -ForegroundColor Cyan
+Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Formation : $FormationLabel" -ForegroundColor White
+Write-Host "  Teams     : $($Teams -join ', ')" -ForegroundColor White
+Write-Host "  Per team  : 1 Router ($RouterModel) + $WorkersPerTeam Workers ($WorkerModel)" -ForegroundColor White
+$total = $Teams.Count * ($WorkersPerTeam + 1)
+Write-Host "  Total     : $total agents" -ForegroundColor White
 Write-Host ""
 
 # ============================================================
-# Step 1: Clean existing session
+# Ensure directories
 # ============================================================
-Write-Host "  [1/5] Cleaning up existing sessions..." -ForegroundColor Yellow
-psmux kill-session -t $SessionName 2>$null
-Write-Host "  Done." -ForegroundColor Green
+@("swarm/boards", "swarm/results", "swarm/projects") | ForEach-Object {
+    if (-not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
+}
 
 # ============================================================
-# Step 2: Reset board and results (if -Clean)
+# Deploy each team
 # ============================================================
-if ($Clean) {
-    Write-Host "  [2/5] Resetting task board and results..." -ForegroundColor Yellow
+foreach ($teamName in $Teams) {
+    $session = $teamName
 
-    # Backup if board has content
-    if (Test-Path "swarm/board.yaml") {
-        $backupDir = "logs/backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-        Copy-Item "swarm/board.yaml" "$backupDir/" -ErrorAction SilentlyContinue
-        Copy-Item "swarm/results/*" "$backupDir/" -ErrorAction SilentlyContinue
-    }
+    Write-Host "  [$teamName] Deploying..." -ForegroundColor Yellow
 
-    # Reset board
-    @"
-# AI Swarm Task Board
-# Router writes tasks here. Workers pick them up.
+    # Kill existing session
+    psmux kill-session -t $session 2>$null
+
+    # Reset board if -Clean
+    if ($Clean) {
+        @"
+# $teamName Team Task Board
 tasks: []
-"@ | Set-Content "swarm/board.yaml" -Encoding UTF8
-
-    # Clear results
-    if (Test-Path "swarm/results") {
-        Remove-Item "swarm/results/*" -Force -ErrorAction SilentlyContinue
+"@ | Set-Content "swarm/boards/${teamName}.yaml" -Encoding UTF8
+        Write-Host "    Board reset." -ForegroundColor Gray
     } else {
-        New-Item -ItemType Directory -Path "swarm/results" -Force | Out-Null
+        # Create board if doesn't exist
+        if (-not (Test-Path "swarm/boards/${teamName}.yaml")) {
+            @"
+# $teamName Team Task Board
+tasks: []
+"@ | Set-Content "swarm/boards/${teamName}.yaml" -Encoding UTF8
+        }
     }
 
-    # Reset status
-    @"
-# Swarm Status
-Last updated: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
+    # Create session with Router window
+    psmux new-session -d -s $session -n "router"
+    psmux set-option -p -t "${session}:router.0" @agent_id "router"
+    psmux set-option -p -t "${session}:router.0" @team_name $teamName
+    psmux send-keys -t "${session}:router" "cd `"$(Get-Location)`"" Enter
 
-## Active Tasks
-None
+    # Create Workers window with splits
+    psmux new-window -t $session -n "workers"
 
-## Completed
-None
-"@ | Set-Content "swarm/status.md" -Encoding UTF8
-
-    Write-Host "  Board and results reset." -ForegroundColor Green
-} else {
-    Write-Host "  [2/5] Keeping existing board state." -ForegroundColor Yellow
-    # Ensure directories exist
-    @("swarm/results") | ForEach-Object {
-        if (-not (Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
-    }
-}
-
-# ============================================================
-# Step 3: Create psmux session with windows
-# ============================================================
-Write-Host "  [3/5] Creating psmux session..." -ForegroundColor Yellow
-
-# Create session with Router window
-psmux new-session -d -s $SessionName -n "router"
-psmux set-option -p -t "${SessionName}:router.0" @agent_id "router"
-psmux send-keys -t "${SessionName}:router" "cd `"$(Get-Location)`"" Enter
-
-# Create a window per pool
-foreach ($poolName in $config.pools.Keys) {
-    $pool = $config.pools[$poolName]
-    $workerCount = $pool.workers
-
-    psmux new-window -t $SessionName -n $poolName
-    psmux set-option -p -t "${SessionName}:${poolName}.0" @agent_id "${poolName}_0"
-    psmux send-keys -t "${SessionName}:${poolName}.0" "cd `"$(Get-Location)`"" Enter
-
-    # Split panes for additional workers
-    for ($i = 1; $i -lt $workerCount; $i++) {
-        psmux split-window -t "${SessionName}:${poolName}" -h
-        psmux set-option -p -t "${SessionName}:${poolName}.$i" @agent_id "${poolName}_$i"
-        psmux send-keys -t "${SessionName}:${poolName}.$i" "cd `"$(Get-Location)`"" Enter
+    for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
+        if ($i -gt 0) {
+            # Alternate horizontal/vertical for grid layout
+            if ($i % 2 -eq 1) {
+                psmux split-window -t "${session}:workers" -h
+            } else {
+                psmux split-window -t "${session}:workers" -v
+            }
+        }
+        psmux set-option -p -t "${session}:workers.$i" @agent_id "worker_$i"
+        psmux set-option -p -t "${session}:workers.$i" @team_name $teamName
+        psmux send-keys -t "${session}:workers.$i" "cd `"$(Get-Location)`"" Enter
     }
 
-    # Balance pane layout
-    psmux select-layout -t "${SessionName}:${poolName}" tiled 2>$null
-}
+    psmux select-layout -t "${session}:workers" tiled 2>$null
 
-# Show pane borders with agent IDs
-psmux set-option -t $SessionName -w pane-border-status top
-psmux set-option -t $SessionName -w pane-border-format '#{pane_index} #{@agent_id}'
+    # Pane borders
+    psmux set-option -t $session -w pane-border-status top
+    psmux set-option -t $session -w pane-border-format '#{@team_name} / #{@agent_id}'
 
-Write-Host "  Session created." -ForegroundColor Green
+    Write-Host "    Session created." -ForegroundColor Gray
 
-# ============================================================
-# Step 4: Launch Claude Code (unless -SetupOnly)
-# ============================================================
-if (-not $SetupOnly) {
-    Write-Host "  [4/5] Launching Claude Code on all agents..." -ForegroundColor Yellow
+    # Launch Claude Code
+    if (-not $SetupOnly) {
+        # Router
+        psmux send-keys -t "${session}:router.0" "${RouterThinking}claude --model $RouterModel --dangerously-skip-permissions"
+        psmux send-keys -t "${session}:router.0" Enter
+        Write-Host "    Router ($RouterModel) launched." -ForegroundColor Gray
 
-    # Router
-    $routerModel = $config.router.model
-    $routerThinking = if ($config.router.thinking) { "" } else { "MAX_THINKING_TOKENS=0 " }
-    psmux send-keys -t "${SessionName}:router.0" "${routerThinking}claude --model $routerModel --dangerously-skip-permissions"
-    psmux send-keys -t "${SessionName}:router.0" Enter
-    Write-Host "    Router ($routerModel) launched." -ForegroundColor Gray
+        Start-Sleep -Seconds 2
 
-    Start-Sleep -Seconds 2
+        # Workers
+        for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
+            psmux send-keys -t "${session}:workers.$i" "claude --model $WorkerModel --dangerously-skip-permissions"
+            psmux send-keys -t "${session}:workers.$i" Enter
+            Start-Sleep -Milliseconds 500
+        }
+        Write-Host "    Workers ($WorkersPerTeam x $WorkerModel) launched." -ForegroundColor Gray
 
-    # Workers
-    foreach ($poolName in $config.pools.Keys) {
-        $pool = $config.pools[$poolName]
-        $workerCount = $pool.workers
-        $model = $pool.model
-
-        for ($i = 0; $i -lt $workerCount; $i++) {
-            psmux send-keys -t "${SessionName}:${poolName}.$i" "claude --model $model --dangerously-skip-permissions"
-            psmux send-keys -t "${SessionName}:${poolName}.$i" Enter
+        # Wait for Router to be ready
+        Write-Host "    Waiting for Router..." -ForegroundColor Gray
+        for ($w = 0; $w -lt 30; $w++) {
+            $capture = psmux capture-pane -t "${session}:router.0" -p 2>$null
+            if ($capture -match "bypass permissions") {
+                Write-Host "    Router ready." -ForegroundColor Gray
+                break
+            }
             Start-Sleep -Seconds 1
         }
-        Write-Host "    $poolName pool ($workerCount x $model) launched." -ForegroundColor Gray
-    }
 
-    Write-Host "  All agents launched." -ForegroundColor Green
+        # Load instructions
+        psmux send-keys -t "${session}:router.0" "Read swarm/router.md and swarm/teams/${teamName}.yaml and swarm/config.yaml. You are the Router of the ${teamName} team."
+        Start-Sleep -Milliseconds 500
+        psmux send-keys -t "${session}:router.0" Enter
 
-    # ============================================================
-    # Step 5: Load instructions
-    # ============================================================
-    Write-Host "  [5/5] Loading instructions..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
 
-    # Wait for Router to be ready
-    Write-Host "    Waiting for Claude Code to start (max 30s)..." -ForegroundColor Gray
-    for ($i = 0; $i -lt 30; $i++) {
-        $capture = psmux capture-pane -t "${SessionName}:router.0" -p 2>$null
-        if ($capture -match "bypass permissions") {
-            Write-Host "    Router ready (${i}s)." -ForegroundColor Gray
-            break
-        }
-        Start-Sleep -Seconds 1
-    }
-
-    # Send instructions to Router
-    psmux send-keys -t "${SessionName}:router.0" "Read swarm/router.md and swarm/config.yaml. You are the Router."
-    Start-Sleep -Milliseconds 500
-    psmux send-keys -t "${SessionName}:router.0" Enter
-
-    Start-Sleep -Seconds 2
-
-    # Send instructions to Workers
-    foreach ($poolName in $config.pools.Keys) {
-        $pool = $config.pools[$poolName]
-        $workerCount = $pool.workers
-
-        for ($i = 0; $i -lt $workerCount; $i++) {
-            $agentId = "${poolName}_$i"
-            psmux send-keys -t "${SessionName}:${poolName}.$i" "Read swarm/worker.md. You are worker $agentId in the $poolName pool."
+        for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
+            psmux send-keys -t "${session}:workers.$i" "Read swarm/worker.md and swarm/teams/${teamName}.yaml. You are worker_$i in the ${teamName} team."
             Start-Sleep -Milliseconds 300
-            psmux send-keys -t "${SessionName}:${poolName}.$i" Enter
+            psmux send-keys -t "${session}:workers.$i" Enter
             Start-Sleep -Seconds 1
         }
+        Write-Host "    Instructions loaded." -ForegroundColor Gray
     }
 
-    Write-Host "  Instructions loaded." -ForegroundColor Green
-} else {
-    Write-Host "  [4/5] Setup only mode. Claude Code not launched." -ForegroundColor Yellow
-    Write-Host "  [5/5] Skipped (no Claude Code)." -ForegroundColor Yellow
+    Write-Host "  [$teamName] Ready." -ForegroundColor Green
+    Write-Host ""
 }
 
 # ============================================================
 # Summary
 # ============================================================
+Write-Host "  ╔══════════════════════════════════════════════════════╗" -ForegroundColor Green
+Write-Host "  ║  All teams deployed.                                ║" -ForegroundColor Green
+Write-Host "  ╚══════════════════════════════════════════════════════╝" -ForegroundColor Green
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "  ║  Swarm Ready                                    ║" -ForegroundColor Green
-Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Session: $SessionName" -ForegroundColor White
-Write-Host "  Formation: $Formation" -ForegroundColor White
-Write-Host ""
-
-# Show formation details
-Write-Host "  ┌──────────────────────────────────────────────────┐" -ForegroundColor Gray
-Write-Host "  │  Windows:                                        │" -ForegroundColor Gray
-Write-Host "  │    router   - Router ($($config.router.model))$(if(-not $config.router.thinking){' (no thinking)'})" -ForegroundColor Gray
-foreach ($poolName in $config.pools.Keys) {
-    $pool = $config.pools[$poolName]
-    $padded = $poolName.PadRight(10)
-    Write-Host "  │    $padded - $($pool.workers) x $($pool.model)" -ForegroundColor Gray
+Write-Host "  Connect to a team:" -ForegroundColor White
+foreach ($t in $Teams) {
+    Write-Host "    psmux attach -t $t" -ForegroundColor Gray
 }
-Write-Host "  └──────────────────────────────────────────────────┘" -ForegroundColor Gray
-Write-Host ""
-
-$totalWorkers = ($config.pools.Values | ForEach-Object { $_.workers } | Measure-Object -Sum).Sum
-Write-Host "  Total: 1 Router + $totalWorkers Workers = $($totalWorkers + 1) agents" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Connect:" -ForegroundColor White
-Write-Host "    psmux attach -t $SessionName         # Full session" -ForegroundColor Gray
-Write-Host "    psmux select-window -t ${SessionName}:router  # Router only" -ForegroundColor Gray
 Write-Host ""
