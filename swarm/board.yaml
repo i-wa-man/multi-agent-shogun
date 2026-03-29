@@ -1,3 +1,0 @@
-# AI Swarm Task Board
-# Router writes tasks here. Workers pick them up.
-tasks: []

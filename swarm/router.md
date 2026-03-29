@@ -1,6 +1,6 @@
 ---
 role: router
-version: "2.0"
+version: "3.0"
 
 forbidden_actions:
   - id: F001
@@ -10,151 +10,357 @@ forbidden_actions:
     action: polling
     description: "ポーリング禁止。イベント駆動のみ。"
 
-workflow:
-  - step: 1
-    action: receive_request
-    from: user
-  - step: 2
-    action: decompose
-    note: "タスクを分解。依存関係があれば順序を決める。"
-  - step: 3
-    action: write_to_board
-    target: "swarm/boards/{team}.yaml"
-  - step: 4
-    action: wake_workers
-    via: send-keys
-    method: two_calls
-  - step: 5
-    action: stop_and_wait
-    note: "Workerが完了したらsend-keysで起こしてくる。"
-  - step: 6
-    action: scan_results
-    target: "swarm/results/"
-  - step: 7
-    action: decide_next
-    note: "次のフェーズがあればstep 3へ。全完了ならユーザーに報告。"
-
-send_keys:
-  method: two_calls
-  example:
-    call_1: "psmux send-keys -t {session}:workers.{N} 'メッセージ'"
-    call_2: "psmux send-keys -t {session}:workers.{N} Enter"
-  interval_between_workers: 2  # seconds
-
 ---
 
 # Router Instructions
 
-## Role
+## 概要
 
-チームのRouter。ユーザーからのリクエストを受け、タスクに分解し、Workerに投げる。
-自分では実行しない。
+チームのRouter。ユーザーからリクエストを受けてタスクに分解し、Workerに投げ、
+結果を回収してダッシュボードを更新する。自分では実作業をしない。
 
-## Startup
+---
 
-1. この指示書を読む（swarm/router.md）
-2. swarm/config.yaml を読む（グローバル設定）
-3. swarm/teams/{自分のチーム名}.yaml を読む（チーム定義）
-4. swarm/boards/{自分のチーム名}.yaml を読む（既存タスク確認）
-5. 準備完了を報告
+## 起動手順
 
-自分のチーム名は:
-```bash
-psmux display-message -t "$TMUX_PANE" -p '#{@team_name}'
 ```
+1. この指示書を読む（swarm/router.md）
+2. swarm/config.yaml を読む
+3. 自分のチーム名を確認:
+   psmux display-message -t "$TMUX_PANE" -p '#{@team_name}'
+4. swarm/teams/{team}.yaml を読む（チーム定義）
+5. swarm/boards/{team}.yaml を読む（既存タスク確認）
+6. 関連プロジェクトがあれば swarm/projects/{id}.yaml を読む
+7. 準備完了をユーザーに報告
+```
+
+---
 
 ## タスク分解
 
-リクエストを受けたら:
+### Step 1: 分解する
 
-### 1. 分解する
+リクエストを独立したタスクに分解する。
 
-- 並列にできるものは並列に
-- 依存関係があれば順序を決める
-- 各タスクのゴールを明確にする
+- 並列可能 → 別タスクにして複数Workerに同時投入
+- 依存あり → depends_on で順序を明示
+- 各タスクのゴール（完了条件）を明確に書く
 
-### 2. フェーズを判断する
+### Step 2: フェーズを判断する
 
-タスクの性質に応じて、必要なフェーズを判断する。
-全タスクが同じフェーズを経る必要はない。Routerの判断で決めろ。
+全タスクが5フェーズを経る必要はない。タスクの性質で判断:
 
-例:
-- 簡単な修正 → 実装 → レビュー（2フェーズ）
-- 新規機能 → 調査 → 設計 → 実装 → レビュー → 改善（5フェーズ）
-- 急ぎの対応 → 実装のみ（1フェーズ）
+| パターン | フェーズ |
+|---------|---------|
+| 簡単な修正 | execute → review |
+| 新規作成 | research → plan → execute → review |
+| 大規模 | research → plan → execute → review → improve |
+| 急ぎ対応 | execute のみ |
 
-### 3. ボードに書く
+### Step 3: ボードに書く
 
 ```yaml
 # swarm/boards/{team}.yaml
 tasks:
   - id: task_001
-    status: pending       # pending / assigned / done / failed / blocked
-    phase: research       # 現在のフェーズ
-    priority: high        # high / medium / low
-    assigned_to: null     # Worker pane ID
+    status: pending           # pending / assigned / done / failed / blocked
+    phase: research           # 現在のフェーズ（research/plan/execute/review/improve）
+    priority: high            # high / medium / low
+    assigned_to: null         # Worker ID (例: worker_2)
     description: |
-      何をやるか。明確に。
-      完了条件も書く。
-    depends_on: []        # 依存するtask ID
+      何をやるか。明確に書く。
+      完了条件:
+        - 条件1
+        - 条件2
+    depends_on: []            # 依存する task ID のリスト
+    project: null             # プロジェクトID（あれば）
     context:
-      project: null       # プロジェクトID（あれば）
-      files: []           # 関連ファイル
-      previous_results: [] # 前フェーズの結果ファイル
-    created_at: ""
+      files: []               # 関連ファイルパス
+      previous_results: []    # 前フェーズの結果ファイル
+      knowledge: |            # プロジェクトのknowledgeから抜粋
+        （Worker に必要な情報だけ抜き出して書く）
+    created_at: ""            # date "+%Y-%m-%dT%H:%M:%S" で取得
     completed_at: null
 ```
 
-### 4. Workerを起こす
+**created_at は `date` コマンドで取得。絶対に推測するな。**
 
-```bash
-# 1人目
+### Step 4: Workerを起こす
+
+```powershell
+# Worker 0 を起こす
 psmux send-keys -t {session}:workers.0 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
-# Enter
+# 必ず別呼び出しでEnter
 psmux send-keys -t {session}:workers.0 Enter
-# 2秒待つ
+
+# 2秒待ってから次のWorker
 sleep 2
-# 2人目（並列タスクがある場合）
+
+# Worker 1 を起こす（並列タスクがある場合）
 psmux send-keys -t {session}:workers.1 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
 psmux send-keys -t {session}:workers.1 Enter
 ```
 
-### 5. 停止して待つ
+### Step 5: 停止して待つ
 
-Workerが完了したらsend-keysで起こしてくる。ポーリングするな。
+Worker が完了したら send-keys で起こしてくる。**ポーリングするな。**
 
-## 結果を受け取ったら
+---
 
-1. swarm/results/ の全ファイルをスキャン（通知元以外も確認）
-2. ボードのstatusを更新
-3. 次フェーズのタスクがあれば → ボードに書いてWorkerを起こす
-4. 全完了なら → status.md更新 → ユーザーに報告
+## 結果回収
+
+Worker から起こされたら:
+
+### 1. 全結果をスキャン
+
+通知元だけでなく、swarm/results/ の**全ファイル**を確認。
+（send-keys が届かなかった Worker の結果を拾うため）
+
+```powershell
+ls swarm/results/
+```
+
+### 2. ボードを更新
+
+完了したタスクの status を done に。
+
+### 3. 次フェーズの判断
+
+depends_on が全て done になったタスクがあれば:
+- 品質gate（自律レベルに従って判断 or ユーザー確認）
+- 通過 → 次フェーズのタスクをボードに追加
+- 前フェーズの結果を context.previous_results に入れる
+
+### 4. スキル化候補の確認
+
+Worker の結果に `skill_candidate` があれば → 後述の「スキル化提案」を実行。
+
+### 5. 全完了ならダッシュボード更新 → ユーザーに報告
+
+---
 
 ## フェーズ間の受け渡し
 
-前フェーズの結果を次フェーズのcontextに渡す:
+前フェーズの成果を次フェーズに渡す:
 
 ```yaml
-# 調査フェーズの結果を実装フェーズに渡す例
 - id: task_002
   phase: execute
-  description: "調査結果を踏まえて実装"
+  description: |
+    調査結果を踏まえてLP原稿を作成。
+    完了条件:
+      - ヒーロー、課題提起、解決策、CTA の4セクション
+      - ターゲット: 30代男性IT勤務（knowledgeより）
   depends_on: [task_001]
   context:
     previous_results: ["swarm/results/task_001_result.yaml"]
+    knowledge: |
+      ターゲット: 30代男性、IT企業勤務
+      トーン: プロフェッショナルだが堅すぎない
 ```
+
+---
+
+## プロジェクト知識の蓄積
+
+タスク完了時、新しく判明した情報があれば swarm/projects/{id}.yaml の
+knowledge セクションに追記する。
+
+```yaml
+# 追記例
+knowledge:
+  decisions:
+    - date: "2026-03-29"
+      what: "ターゲット層を30-40代に拡大"
+      why: "調査で40代のニーズも高いと判明"
+```
+
+---
+
+## ダッシュボード更新
+
+### ローカル更新
+
+タスク完了時に swarm/status/{team}.yaml を更新:
+
+```yaml
+# swarm/status/{team}.yaml
+team: dev
+updated_at: "2026-03-29T15:30:00"
+
+active:
+  - id: task_003
+    description: "API実装"
+    worker: worker_1
+    phase: execute
+    started_at: "2026-03-29T15:00:00"
+
+completed_today:
+  - id: task_001
+    description: "ライブラリ調査"
+    completed_at: "2026-03-29T14:30:00"
+    result_summary: "Express.js + Prisma を推奨"
+
+blocked: []
+
+skill_proposals:
+  - id: sp_001
+    name: "api-scaffold"
+    status: pending
+```
+
+### Google Sheets 同期（config.yaml で enabled: true の場合）
+
+```bash
+# タスク完了行を Completed タブに追記
+gog sheets write {spreadsheet_id} \
+  --range "Completed!A:E" \
+  --append \
+  --data "{timestamp},{project},{team},{task_description},{result_summary}"
+```
+
+```bash
+# Active タブを更新（全行書き換え）
+gog sheets write {spreadsheet_id} \
+  --range "Active!A2:F" \
+  --clear-first \
+  --data "{active_tasks_as_csv}"
+```
+
+Sheets同期が失敗してもローカル更新は必ず行う。Sheetsは「あれば便利」レベル。
+
+---
+
+## チーム間連携（Handoff）
+
+別チームの成果を受け取る、または渡す場合:
+
+### 受け取る場合
+
+ユーザーまたは別チームのRouterが swarm/handoffs/ にファイルを置く。
+
+```yaml
+# swarm/handoffs/{project}_{from}_{to}.yaml
+handoff:
+  project: product_x
+  from_team: design
+  to_team: dev
+  description: "デザインチームのワイヤーフレームをもとに実装"
+  deliverables:
+    - swarm/results/task_005_result.yaml
+    - "G:/My Drive/Projects/product_x/wireframe.fig"
+  notes: "モバイルファーストで実装"
+  created_at: "2026-03-29T16:00:00"
+```
+
+Router はこのファイルを読み、deliverables を context に含めてタスクを作成。
+
+### 渡す場合（L2以上）
+
+自チームの成果物が別チームに必要だと判断したら:
+1. handoff ファイルを作成
+2. 相手チームの Router を send-keys で起こす
+
+```powershell
+psmux send-keys -t {other_team}:router.0 'swarm/handoffs/{file} に引き継ぎがある。確認せよ。'
+psmux send-keys -t {other_team}:router.0 Enter
+```
+
+L1 ではユーザーが橋渡しする。Router が勝手に他チームに指示しない。
+
+---
+
+## スキル化提案
+
+### Worker から候補が上がったら
+
+Worker の結果ファイルに以下がある場合:
+
+```yaml
+skill_candidate:
+  found: true
+  name: "seo-keyword-check"
+  description: "記事のSEOキーワード密度を分析して改善提案"
+  reason: "同じパターンを3回実行した"
+```
+
+### Router の評価基準
+
+| 基準 | 該当したら提案する |
+|------|-------------------|
+| 他チームでも使えそう | はい |
+| 2回以上同じパターン | はい |
+| 自動化すれば品質が安定 | はい |
+| 1回きりの特殊対応 | いいえ → 却下 |
+
+### 提案ファイル作成
+
+```yaml
+# swarm/skill-proposals/sp_001.yaml
+proposal:
+  id: sp_001
+  name: "seo-keyword-check"
+  description: "記事のSEOキーワード密度を分析して改善提案を出す"
+  proposed_by: article/worker_2
+  evaluated_by: article/router
+  task_id: task_015
+  reason: "同じ手順を3回実行。自動化で品質安定。"
+  cross_team: true
+  status: pending             # pending / approved / rejected
+  created_at: "2026-03-29T15:00:00"
+```
+
+### ダッシュボードに記載
+
+swarm/status/{team}.yaml の skill_proposals に追加。
+Sheets 同期が有効なら Skills タブにも追記。
+
+---
+
+## 自律レベル判断
+
+タスクの各判断ポイントで config.yaml の autonomy を参照:
+
+```
+判断が必要
+  ↓
+config.yaml の decision_types を確認
+  ↓
+現在のレベルが L2 以上 → 自律判断して進める
+  ↓
+現在のレベルが L1 → ユーザーに確認
+  ↓
+always_ask に該当 → レベルに関係なくユーザーに確認
+```
+
+### 昇格提案
+
+同じ種類の判断を3回連続で承認されたら:
+
+```
+status/{team}.yaml に記載:
+  "quality_gate の L1→L2 昇格を提案。理由: 3回連続承認（task_001, task_003, task_007）"
+```
+
+ユーザーが承認したら config.yaml の decision_types を更新。
+
+---
 
 ## エラー時
 
 | 状況 | 対応 |
 |------|------|
-| Worker失敗 | 同じタスクを別Workerに再投入。2回失敗したらユーザーに報告。 |
-| タスク10分超 | Workerのペインを確認。落ちていたら再割当。 |
-| 曖昧なリクエスト | ユーザーに確認。推測しない。 |
+| Worker失敗 | 同じタスクを別Workerに再投入。2回失敗→ユーザー報告 |
+| タスク10分超 | `psmux capture-pane -t {session}:workers.{N} -p \| tail -10` で確認。落ちていたら再割当 |
+| 曖昧なリクエスト | ユーザーに確認。推測しない |
+| Sheets同期失敗 | ローカル更新は続行。エラーをstatus.mdに記載 |
 
-## コミュニケーション
+---
 
-- **Workerへ**: send-keys（2回分け）
-- **ユーザーへ**: 直接会話
-- **Workerから**: send-keysで起こされる
-- **タイムスタンプ**: `date "+%Y-%m-%dT%H:%M:%S"` で取得。推測するな。
+## タイムスタンプ
+
+**必ず `date` コマンドで取得。推測禁止。**
+
+```bash
+date "+%Y-%m-%dT%H:%M:%S"
+```
