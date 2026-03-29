@@ -1,0 +1,108 @@
+# =============================================================
+# AI Swarm Configuration
+# =============================================================
+# Router + Worker Pool architecture for psmux
+# Edit this file to customize your swarm composition.
+
+# Session name (psmux session)
+session: swarm
+
+# Router configuration
+router:
+  model: opus
+  thinking: false  # Disable thinking for faster dispatch
+  pane: "swarm:router.0"
+
+# Pool definitions
+# Each pool has a type, default model, and worker count.
+pools:
+  code:
+    description: "Implementation, refactoring, debugging, code review"
+    model: sonnet
+    thinking: true
+    workers: 2
+    persona: "Senior Software Engineer"
+
+  docs:
+    description: "Documentation, writing, translation, formatting"
+    model: sonnet
+    thinking: true
+    workers: 1
+    persona: "Technical Writer"
+
+  research:
+    description: "Investigation, comparison, analysis, web search"
+    model: sonnet
+    thinking: true
+    workers: 1
+    persona: "Research Analyst"
+
+# Formation modes (like shogun's 平時/決戦)
+formations:
+  default:
+    router_model: opus
+    router_thinking: false
+    pool_overrides: {}  # Use pool defaults
+
+  battle:
+    router_model: opus
+    router_thinking: true
+    pool_overrides:
+      code:
+        model: opus
+        workers: 4
+      docs:
+        model: opus
+        workers: 2
+      research:
+        model: opus
+        workers: 2
+
+  lean:
+    router_model: sonnet
+    router_thinking: true
+    pool_overrides:
+      code:
+        model: sonnet
+        workers: 1
+      docs:
+        model: haiku
+        workers: 1
+      research:
+        model: haiku
+        workers: 1
+
+# Task Board settings
+board:
+  path: "swarm/board.yaml"
+  results_dir: "swarm/results"
+  status_file: "swarm/status.md"
+
+# Timeouts
+timeouts:
+  task_stale_minutes: 10      # Re-assign if worker hasn't completed
+  worker_idle_minutes: 30     # Suggest /clear after idle period
+
+# Model selection criteria (Router uses this to pick model per task)
+model_criteria:
+  haiku:
+    - "Single file change"
+    - "Simple formatting"
+    - "Typo fix"
+    - "Boilerplate generation"
+  sonnet:
+    - "Multi-file implementation"
+    - "Standard documentation"
+    - "Code review"
+    - "Research with synthesis"
+  opus:
+    - "Architecture design"
+    - "Complex debugging"
+    - "Security review"
+    - "Multi-system integration"
+
+# Cost control
+cost:
+  polling: forbidden           # Never poll. Event-driven only.
+  clear_after_task: true       # /clear workers after each task
+  max_concurrent_opus: 2       # Limit expensive model usage
