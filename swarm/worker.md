@@ -190,6 +190,32 @@ sleep 10
 
 ---
 
+## コンテキスト管理
+
+**ステータスラインでコンテキスト使用量を常に意識せよ。**
+
+### 50%超えたら
+
+1. 作業を区切りのよいところで止める
+2. 途中成果を結果ファイルに書く:
+   ```yaml
+   status: blocked
+   result:
+     summary: "コンテキスト50%超。途中成果を保存。"
+     progress:
+       completed: ["完了した部分"]
+       remaining: ["残りの作業"]
+     deliverables:
+       - path/to/partial_output
+     notes: "/clear後に残りを再開可能"
+   ```
+3. ボードを `status: blocked` に更新
+4. Routerに報告（通常のsend-keys手順）
+5. **Routerが/clearを送ってくるので待つ**
+6. /clear後、復帰手順に従って残りタスクを取得
+
+---
+
 ## 失敗時
 
 タスクが実行できない場合:

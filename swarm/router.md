@@ -124,18 +124,32 @@ ls swarm/results/
 
 完了したタスクの status を done に。
 
-### 3. 次フェーズの判断
+### 3. 品質gate（レビュースキル）
 
-depends_on が全て done になったタスクがあれば:
-- 品質gate（自律レベルに従って判断 or ユーザー確認）
+priority: high のタスクが完了したら、セルフレビューだけで通さない。
+`/review` スキル（context: fork で独立サブエージェント実行）で検証:
+
+```
+/review swarm/results/task_001_result.yaml
+```
+
+- OK → 次フェーズへ
+- NG → 指摘内容を含めて修正タスクをボードに追加
+
+priority: medium / low はセルフレビューを信用して通してよい。
+
+### 4. 次フェーズの判断
+
+depends_on が全て done（+ レビュー通過）になったタスクがあれば:
+- 自律レベルに従って判断 or ユーザー確認
 - 通過 → 次フェーズのタスクをボードに追加
 - 前フェーズの結果を context.previous_results に入れる
 
-### 4. スキル化候補の確認
+### 5. スキル化候補の確認
 
 Worker の結果に `skill_candidate` があれば → 後述の「スキル化提案」を実行。
 
-### 5. 全完了ならダッシュボード更新 → ユーザーに報告
+### 6. 全完了ならダッシュボード更新 → ユーザーに報告
 
 ---
 
@@ -267,6 +281,81 @@ psmux send-keys -t {other_team}:router.0 Enter
 ```
 
 L1 ではユーザーが橋渡しする。Router が勝手に他チームに指示しない。
+
+### handoff のステータス管理
+
+handoff ファイルには status を含める:
+
+```yaml
+handoff:
+  id: ho_001
+  project: product_x
+  from_team: design
+  to_team: dev
+  status: pending          # pending → accepted → completed
+  deliverables:
+    - swarm/results/task_005_result.yaml
+  notes: "モバイルファーストで"
+  created_at: "2026-03-29T16:00:00"
+  accepted_at: null
+  completed_at: null
+```
+
+受け取ったRouterは `status: accepted` に更新。
+成果が出たら `status: completed` に更新。
+これで「渡したのに気づかれてない」を防ぐ。
+
+---
+
+## Worker のコンテキスト管理
+
+Worker からコンテキスト50%超の報告を受けたら:
+
+1. 途中成果を確認
+2. Worker に /clear を送信:
+   ```powershell
+   psmux send-keys -t {session}:workers.{N} '/clear'
+   psmux send-keys -t {session}:workers.{N} Enter
+   ```
+3. /clear 完了を確認（capture-pane でプロンプト表示を確認）
+4. 残りタスクをボードに追加（途中成果を context.previous_results に含める）
+5. Worker を起こす
+
+---
+
+## Memory MCP
+
+セッションを跨いで知識を保持する。
+
+### 記録するタイミング
+
+- ユーザーが好みを表明（トーン、方針等）
+- プロジェクト横断で再利用できる知見
+- 自律レベル昇格/降格の履歴
+- スキル化提案の承認/却下理由
+
+### 記録しないもの
+
+- タスクの詳細（YAMLにある）
+- ファイルの中身（読めばわかる）
+- 進行中タスクの状況（ボードにある）
+
+### 使い方
+
+```bash
+# まずツールをロード
+ToolSearch("select:mcp__memory__read_graph")
+ToolSearch("select:mcp__memory__create_entities")
+ToolSearch("select:mcp__memory__add_observations")
+
+# 読み込み
+mcp__memory__read_graph()
+
+# 記録
+mcp__memory__add_observations(observations=[
+  {"entityName": "user", "contents": ["シンプルな表現を好む"]}
+])
+```
 
 ---
 
