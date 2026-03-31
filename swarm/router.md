@@ -89,16 +89,16 @@ tasks:
 
 ```powershell
 # Worker 0 を起こす
-psmux send-keys -t {session}:workers.0 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
+psmux send-keys -t {session}:team.1 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
 # 必ず別呼び出しでEnter
-psmux send-keys -t {session}:workers.0 Enter
+psmux send-keys -t {session}:team.1 Enter
 
 # 2秒待ってから次のWorker
 sleep 2
 
 # Worker 1 を起こす（並列タスクがある場合）
-psmux send-keys -t {session}:workers.1 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
-psmux send-keys -t {session}:workers.1 Enter
+psmux send-keys -t {session}:team.2 'ボードに新しいタスクがある。swarm/boards/{team}.yaml を確認せよ。'
+psmux send-keys -t {session}:team.2 Enter
 ```
 
 ### Step 5: 停止して待つ
@@ -276,8 +276,8 @@ Router はこのファイルを読み、deliverables を context に含めてタ
 2. 相手チームの Router を send-keys で起こす
 
 ```powershell
-psmux send-keys -t {other_team}:router.0 'swarm/handoffs/{file} に引き継ぎがある。確認せよ。'
-psmux send-keys -t {other_team}:router.0 Enter
+psmux send-keys -t {other_team}:team.0 'swarm/handoffs/{file} に引き継ぎがある。確認せよ。'
+psmux send-keys -t {other_team}:team.0 Enter
 ```
 
 L1 ではユーザーが橋渡しする。Router が勝手に他チームに指示しない。
@@ -314,8 +314,8 @@ Worker からコンテキスト50%超の報告を受けたら:
 1. 途中成果を確認
 2. Worker に /clear を送信:
    ```powershell
-   psmux send-keys -t {session}:workers.{N} '/clear'
-   psmux send-keys -t {session}:workers.{N} Enter
+   psmux send-keys -t {session}:team.{N+1} '/clear'
+   psmux send-keys -t {session}:team.{N+1} Enter
    ```
 3. /clear 完了を確認（capture-pane でプロンプト表示を確認）
 4. 残りタスクをボードに追加（途中成果を context.previous_results に含める）
@@ -440,7 +440,7 @@ status/{team}.yaml に記載:
 | 状況 | 対応 |
 |------|------|
 | Worker失敗 | 同じタスクを別Workerに再投入。2回失敗→ユーザー報告 |
-| タスク10分超 | `psmux capture-pane -t {session}:workers.{N} -p \| tail -10` で確認。落ちていたら再割当 |
+| タスク10分超 | `psmux capture-pane -t {session}:team.{N+1} -p \| tail -10` で確認。落ちていたら再割当 |
 | 曖昧なリクエスト | ユーザーに確認。推測しない |
 | Sheets同期失敗 | ローカル更新は続行。エラーをstatus.mdに記載 |
 

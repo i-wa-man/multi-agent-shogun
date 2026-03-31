@@ -188,32 +188,28 @@ skill_proposals: []
     }
 
     # ----------------------------------------------------------
-    # Create psmux session
+    # Create psmux session (1 window, 6 panes: Router + 5 Workers)
     # ----------------------------------------------------------
-    # Router window
-    psmux new-session -d -s $session -n "router"
-    psmux set-option -p -t "${session}:router.0" @agent_id "router"
-    psmux set-option -p -t "${session}:router.0" @team_name $teamName
-    psmux send-keys -t "${session}:router" "cd `"$(Get-Location)`"" Enter
+    # Pane 0: Router
+    psmux new-session -d -s $session -n "team"
+    psmux set-option -p -t "${session}:team.0" @agent_id "router"
+    psmux set-option -p -t "${session}:team.0" @team_name $teamName
+    psmux send-keys -t "${session}:team.0" "cd `"$(Get-Location)`"" Enter
 
-    # Workers window
-    psmux new-window -t $session -n "workers"
-    psmux set-option -p -t "${session}:workers.0" @agent_id "worker_0"
-    psmux set-option -p -t "${session}:workers.0" @team_name $teamName
-    psmux send-keys -t "${session}:workers.0" "cd `"$(Get-Location)`"" Enter
-
-    for ($i = 1; $i -lt $WorkersPerTeam; $i++) {
-        if ($i % 2 -eq 1) {
-            psmux split-window -t "${session}:workers" -h
+    # Panes 1-5: Workers
+    for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
+        $paneIndex = $i + 1
+        if ($paneIndex % 2 -eq 1) {
+            psmux split-window -t "${session}:team" -h
         } else {
-            psmux split-window -t "${session}:workers" -v
+            psmux split-window -t "${session}:team" -v
         }
-        psmux set-option -p -t "${session}:workers.$i" @agent_id "worker_$i"
-        psmux set-option -p -t "${session}:workers.$i" @team_name $teamName
-        psmux send-keys -t "${session}:workers.$i" "cd `"$(Get-Location)`"" Enter
+        psmux set-option -p -t "${session}:team.${paneIndex}" @agent_id "worker_$i"
+        psmux set-option -p -t "${session}:team.${paneIndex}" @team_name $teamName
+        psmux send-keys -t "${session}:team.${paneIndex}" "cd `"$(Get-Location)`"" Enter
     }
 
-    psmux select-layout -t "${session}:workers" tiled 2>$null
+    psmux select-layout -t "${session}:team" tiled 2>$null
 
     # Pane border labels
     psmux set-option -t $session -w pane-border-status top
@@ -226,15 +222,17 @@ skill_proposals: []
     # ----------------------------------------------------------
     if (-not $SetupOnly) {
         # Router
-        psmux send-keys -t "${session}:router.0" "${RouterThinkingPrefix}claude --model $RouterModel --dangerously-skip-permissions"
-        psmux send-keys -t "${session}:router.0" Enter
+        # Router (pane 0)
+        psmux send-keys -t "${session}:team.0" "${RouterThinkingPrefix}claude --model $RouterModel --dangerously-skip-permissions"
+        psmux send-keys -t "${session}:team.0" Enter
 
         Start-Sleep -Seconds 2
 
-        # Workers
+        # Workers (panes 1-5)
         for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
-            psmux send-keys -t "${session}:workers.$i" "claude --model $WorkerModel --dangerously-skip-permissions"
-            psmux send-keys -t "${session}:workers.$i" Enter
+            $paneIndex = $i + 1
+            psmux send-keys -t "${session}:team.${paneIndex}" "claude --model $WorkerModel --dangerously-skip-permissions"
+            psmux send-keys -t "${session}:team.${paneIndex}" Enter
             Start-Sleep -Milliseconds 500
         }
 
@@ -243,7 +241,7 @@ skill_proposals: []
         # Wait for Router ready (max 30s)
         $ready = $false
         for ($w = 0; $w -lt 30; $w++) {
-            $capture = psmux capture-pane -t "${session}:router.0" -p 2>$null
+            $capture = psmux capture-pane -t "${session}:team.0" -p 2>$null
             if ($capture -match "bypass permissions") {
                 $ready = $true
                 break
@@ -252,18 +250,19 @@ skill_proposals: []
         }
 
         if ($ready) {
-            # Load instructions: Router
-            psmux send-keys -t "${session}:router.0" "Read swarm/router.md, swarm/teams/${teamName}.yaml, swarm/config.yaml. You are the Router of the ${teamName} team."
+            # Load instructions: Router (pane 0)
+            psmux send-keys -t "${session}:team.0" "Read swarm/router.md, swarm/teams/${teamName}.yaml, swarm/config.yaml. You are the Router of the ${teamName} team."
             Start-Sleep -Milliseconds 500
-            psmux send-keys -t "${session}:router.0" Enter
+            psmux send-keys -t "${session}:team.0" Enter
 
             Start-Sleep -Seconds 2
 
-            # Load instructions: Workers
+            # Load instructions: Workers (panes 1-5)
             for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
-                psmux send-keys -t "${session}:workers.$i" "Read swarm/worker.md and swarm/teams/${teamName}.yaml. You are worker_$i in the ${teamName} team."
+                $paneIndex = $i + 1
+                psmux send-keys -t "${session}:team.${paneIndex}" "Read swarm/worker.md and swarm/teams/${teamName}.yaml. You are worker_$i in the ${teamName} team."
                 Start-Sleep -Milliseconds 300
-                psmux send-keys -t "${session}:workers.$i" Enter
+                psmux send-keys -t "${session}:team.${paneIndex}" Enter
                 Start-Sleep -Seconds 1
             }
             Write-Host " → instructions loaded" -ForegroundColor Gray -NoNewline

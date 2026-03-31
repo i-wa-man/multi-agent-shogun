@@ -160,7 +160,7 @@ completed_at: "2026-03-29T10:30:00"   # date コマンドで取得
 まずRouterの状態を確認:
 
 ```powershell
-psmux capture-pane -t {session}:router.0 -p | tail -5
+psmux capture-pane -t {session}:team.0 -p | tail -5
 ```
 
 **idle判定**: プロンプト（❯）が表示されていれば idle。
@@ -169,9 +169,9 @@ psmux capture-pane -t {session}:router.0 -p | tail -5
 
 ```powershell
 # 1回目: メッセージ
-psmux send-keys -t {session}:router.0 'task_001 完了。結果: swarm/results/task_001_result.yaml'
+psmux send-keys -t {session}:team.0 'task_001 完了。結果: swarm/results/task_001_result.yaml'
 # 2回目: Enter
-psmux send-keys -t {session}:router.0 Enter
+psmux send-keys -t {session}:team.0 Enter
 ```
 
 **busy の場合** → 10秒待ってリトライ（最大3回）。
