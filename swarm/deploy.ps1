@@ -308,4 +308,4 @@ Write-Host "    Open new tabs and run 'psmux attach -t <team>' to watch." -Foreg
 Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 
-claude --model opus --dangerously-skip-permissions -p "Read swarm/commander.md. You are the Commander. Read all team definitions in swarm/teams/ and swarm/config.yaml. Then report ready."
+claude --model opus --dangerously-skip-permissions
