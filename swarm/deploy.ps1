@@ -276,7 +276,8 @@ $watcherArgs = @(
     "gog"
 )
 $configContent = Get-Content "swarm/config.yaml" -Raw -ErrorAction SilentlyContinue
-if ($configContent -match 'spreadsheet_id:\s*"([^"]+)"') {
+$pattern = "spreadsheet_id:\s*`"([^`"]+)`""
+if ($configContent -match $pattern) {
     $watcherArgs[3] = $Matches[1]
 }
 $watcherPath = Join-Path $ScriptDir "watcher.ps1"
