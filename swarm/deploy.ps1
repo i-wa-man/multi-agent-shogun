@@ -57,11 +57,15 @@ if ($List) {
     Write-Host ""
     Write-Host "  Available teams:" -ForegroundColor Cyan
     foreach ($t in $AvailableTeams) {
-        # Read first line of description from YAML
         $desc = ""
         $yamlPath = "$TeamsDir/$t.yaml"
         if (Test-Path $yamlPath) {
-            $desc = (Get-Content $yamlPath | Select-String "^description:" | ForEach-Object { $_ -replace "^description:\s*`"?", "" -replace "`"$", "" }) -join ""
+            foreach ($yline in (Get-Content $yamlPath)) {
+                if ($yline.Contains("description:")) {
+                    $desc = $yline.Split(":", 2)[1].Trim().Trim('"')
+                    break
+                }
+            }
         }
         $padded = $t.PadRight(12)
         Write-Host "    $padded $desc" -ForegroundColor White
@@ -105,9 +109,9 @@ foreach ($t in $Teams) {
 # Banner
 # ============================================================
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║  AI SWARM - Team Deployment                             ║" -ForegroundColor Cyan
-Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+Write-Host "  ==========================================================" -ForegroundColor Cyan
+Write-Host "    AI SWARM - Team Deployment" -ForegroundColor Cyan
+Write-Host "  ==========================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Formation : $FormationLabel" -ForegroundColor White
 Write-Host "  Teams     : $($Teams -join ', ')" -ForegroundColor White
@@ -140,99 +144,86 @@ foreach ($teamName in $Teams) {
     $session = $teamName
     Write-Host "  [$teamName] " -ForegroundColor Yellow -NoNewline
 
-    # ----------------------------------------------------------
     # Kill existing session
-    # ----------------------------------------------------------
     psmux kill-session -t $session 2>$null
 
-    # ----------------------------------------------------------
     # Board: reset (-Clean) or ensure exists
-    # ----------------------------------------------------------
-    $boardPath = "swarm/boards/${teamName}.yaml"
+    $boardPath = "swarm/boards/$teamName.yaml"
     if ($Clean) {
-        # Backup if has content
         if (Test-Path $boardPath) {
-            $content = Get-Content $boardPath -Raw
-            if ($content -match "task_") {
-                $backupDir = "swarm/logs/backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+            $bcontent = Get-Content $boardPath -Raw
+            if ($bcontent.Contains("task_")) {
+                $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+                $backupDir = "swarm/logs/backup_$ts"
                 New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
                 Copy-Item $boardPath "$backupDir/"
             }
         }
-        $boardContent = "# $teamName team task board`ntasks: []"
-        $boardContent | Set-Content $boardPath -Encoding UTF8
+        "# $teamName team task board`ntasks: []" | Set-Content $boardPath -Encoding UTF8
     } else {
         if (-not (Test-Path $boardPath)) {
-            $boardContent = "# $teamName team task board`ntasks: []"
-            $boardContent | Set-Content $boardPath -Encoding UTF8
+            "# $teamName team task board`ntasks: []" | Set-Content $boardPath -Encoding UTF8
         }
     }
 
-    # ----------------------------------------------------------
     # Status file: ensure exists
-    # ----------------------------------------------------------
-    $statusPath = "swarm/status/${teamName}.yaml"
+    $statusPath = "swarm/status/$teamName.yaml"
     if (-not (Test-Path $statusPath)) {
-        $statusContent = "team: $teamName`nupdated_at: `"`"`nactive: []`ncompleted_today: []`nblocked: []`nskill_proposals: []"
-        $statusContent | Set-Content $statusPath -Encoding UTF8
+        $sc = @("team: $teamName", "updated_at: """"", "active: []", "completed_today: []", "blocked: []", "skill_proposals: []")
+        $sc -join "`n" | Set-Content $statusPath -Encoding UTF8
     }
 
-    # ----------------------------------------------------------
     # Create psmux session (1 window, 6 panes: Router + 5 Workers)
-    # ----------------------------------------------------------
     # Pane 0: Router
     psmux new-session -d -s $session -n "team"
-    psmux set-option -p -t "${session}:team.0" @agent_id "router"
-    psmux set-option -p -t "${session}:team.0" @team_name $teamName
-    psmux send-keys -t "${session}:team.0" "cd `"$(Get-Location)`"" Enter
+    psmux set-option -p -t "$($session):team.0" @agent_id "router"
+    psmux set-option -p -t "$($session):team.0" @team_name $teamName
+    psmux send-keys -t "$($session):team.0" "cd ""$(Get-Location)""" Enter
 
     # Panes 1-5: Workers
     for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
-        $paneIndex = $i + 1
-        if ($paneIndex % 2 -eq 1) {
-            psmux split-window -t "${session}:team" -h
+        $p = $i + 1
+        if ($p % 2 -eq 1) {
+            psmux split-window -t "$($session):team" -h
         } else {
-            psmux split-window -t "${session}:team" -v
+            psmux split-window -t "$($session):team" -v
         }
-        psmux set-option -p -t "${session}:team.${paneIndex}" @agent_id "worker_$i"
-        psmux set-option -p -t "${session}:team.${paneIndex}" @team_name $teamName
-        psmux send-keys -t "${session}:team.${paneIndex}" "cd `"$(Get-Location)`"" Enter
+        psmux set-option -p -t "$($session):team.$p" @agent_id "worker_$i"
+        psmux set-option -p -t "$($session):team.$p" @team_name $teamName
+        psmux send-keys -t "$($session):team.$p" "cd ""$(Get-Location)""" Enter
     }
 
-    psmux select-layout -t "${session}:team" tiled 2>$null
+    psmux select-layout -t "$($session):team" tiled 2>$null
 
     # Pane border labels
     psmux set-option -t $session -w pane-border-status top
-    psmux set-option -t $session -w pane-border-format '#{@team_name}/#{@agent_id}'
+    psmux set-option -t $session -w pane-border-format "#{@team_name}/#{@agent_id}"
 
     Write-Host "session created" -ForegroundColor Gray -NoNewline
 
-    # ----------------------------------------------------------
     # Launch Claude Code (unless -SetupOnly)
-    # ----------------------------------------------------------
     if (-not $SetupOnly) {
-        # Router
         # Router (pane 0)
-        psmux send-keys -t "${session}:team.0" "${RouterThinkingPrefix}claude --model $RouterModel --dangerously-skip-permissions"
-        psmux send-keys -t "${session}:team.0" Enter
+        psmux send-keys -t "$($session):team.0" "$($RouterThinkingPrefix)claude --model $RouterModel --dangerously-skip-permissions"
+        psmux send-keys -t "$($session):team.0" Enter
 
         Start-Sleep -Seconds 2
 
         # Workers (panes 1-5)
         for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
-            $paneIndex = $i + 1
-            psmux send-keys -t "${session}:team.${paneIndex}" "claude --model $WorkerModel --dangerously-skip-permissions"
-            psmux send-keys -t "${session}:team.${paneIndex}" Enter
+            $p = $i + 1
+            psmux send-keys -t "$($session):team.$p" "claude --model $WorkerModel --dangerously-skip-permissions"
+            psmux send-keys -t "$($session):team.$p" Enter
             Start-Sleep -Milliseconds 500
         }
 
-        Write-Host " → Claude launched" -ForegroundColor Gray -NoNewline
+        Write-Host " > Claude launched" -ForegroundColor Gray -NoNewline
 
         # Wait for Router ready (max 30s)
         $ready = $false
         for ($w = 0; $w -lt 30; $w++) {
-            $capture = psmux capture-pane -t "${session}:team.0" -p 2>$null
-            if ($capture -match "bypass permissions") {
+            $capture = psmux capture-pane -t "$($session):team.0" -p 2>$null
+            if ($capture -and $capture.ToString().Contains("bypass permissions")) {
                 $ready = $true
                 break
             }
@@ -241,27 +232,27 @@ foreach ($teamName in $Teams) {
 
         if ($ready) {
             # Load instructions: Router (pane 0)
-            psmux send-keys -t "${session}:team.0" "Read swarm/router.md, swarm/teams/${teamName}.yaml, swarm/config.yaml. You are the Router of the ${teamName} team."
+            psmux send-keys -t "$($session):team.0" "Read swarm/router.md, swarm/teams/$teamName.yaml, swarm/config.yaml. You are the Router of the $teamName team."
             Start-Sleep -Milliseconds 500
-            psmux send-keys -t "${session}:team.0" Enter
+            psmux send-keys -t "$($session):team.0" Enter
 
             Start-Sleep -Seconds 2
 
             # Load instructions: Workers (panes 1-5)
             for ($i = 0; $i -lt $WorkersPerTeam; $i++) {
-                $paneIndex = $i + 1
-                psmux send-keys -t "${session}:team.${paneIndex}" "Read swarm/worker.md and swarm/teams/${teamName}.yaml. You are worker_$i in the ${teamName} team."
+                $p = $i + 1
+                psmux send-keys -t "$($session):team.$p" "Read swarm/worker.md and swarm/teams/$teamName.yaml. You are worker_$i in the $teamName team."
                 Start-Sleep -Milliseconds 300
-                psmux send-keys -t "${session}:team.${paneIndex}" Enter
+                psmux send-keys -t "$($session):team.$p" Enter
                 Start-Sleep -Seconds 1
             }
-            Write-Host " → instructions loaded" -ForegroundColor Gray -NoNewline
+            Write-Host " > instructions loaded" -ForegroundColor Gray -NoNewline
         } else {
-            Write-Host " → WARNING: Router not ready in 30s" -ForegroundColor Yellow -NoNewline
+            Write-Host " > WARNING: Router not ready in 30s" -ForegroundColor Yellow -NoNewline
         }
     }
 
-    Write-Host " → Ready" -ForegroundColor Green
+    Write-Host " > Ready" -ForegroundColor Green
 }
 
 # ============================================================
@@ -277,8 +268,8 @@ $watcherArgs = @(
 )
 foreach ($cfgLine in (Get-Content "swarm/config.yaml" -ErrorAction SilentlyContinue)) {
     if ($cfgLine.Contains("spreadsheet_id:")) {
-        $sid = $cfgLine.Split(":")[1].Trim().Trim('"').Trim("'")
-        if ($sid -and $sid.Length -gt 0) { $watcherArgs[3] = $sid }
+        $sid = $cfgLine.Split(":", 2)[1].Trim().Trim('"')
+        if ($sid.Length -gt 0) { $watcherArgs[3] = $sid }
     }
 }
 $watcherPath = Join-Path $ScriptDir "watcher.ps1"
@@ -290,9 +281,9 @@ Write-Host ""
 # Summary
 # ============================================================
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "  ║  All teams deployed.                                    ║" -ForegroundColor Green
-Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host "  ==========================================================" -ForegroundColor Green
+Write-Host "    All teams deployed." -ForegroundColor Green
+Write-Host "  ==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Connect:" -ForegroundColor White
 foreach ($t in $Teams) {
