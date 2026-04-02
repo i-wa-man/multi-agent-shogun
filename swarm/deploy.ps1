@@ -159,16 +159,12 @@ foreach ($teamName in $Teams) {
                 Copy-Item $boardPath "$backupDir/"
             }
         }
-        @"
-# $teamName team task board
-tasks: []
-"@ | Set-Content $boardPath -Encoding UTF8
+        $boardContent = "# $teamName team task board`ntasks: []"
+        $boardContent | Set-Content $boardPath -Encoding UTF8
     } else {
         if (-not (Test-Path $boardPath)) {
-            @"
-# $teamName team task board
-tasks: []
-"@ | Set-Content $boardPath -Encoding UTF8
+            $boardContent = "# $teamName team task board`ntasks: []"
+            $boardContent | Set-Content $boardPath -Encoding UTF8
         }
     }
 
@@ -177,14 +173,8 @@ tasks: []
     # ----------------------------------------------------------
     $statusPath = "swarm/status/${teamName}.yaml"
     if (-not (Test-Path $statusPath)) {
-        @"
-team: $teamName
-updated_at: ""
-active: []
-completed_today: []
-blocked: []
-skill_proposals: []
-"@ | Set-Content $statusPath -Encoding UTF8
+        $statusContent = "team: $teamName`nupdated_at: `"`"`nactive: []`ncompleted_today: []`nblocked: []`nskill_proposals: []"
+        $statusContent | Set-Content $statusPath -Encoding UTF8
     }
 
     # ----------------------------------------------------------
