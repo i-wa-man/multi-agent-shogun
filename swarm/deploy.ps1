@@ -275,10 +275,10 @@ $watcherArgs = @(
     "",
     "gog"
 )
-foreach ($line in (Get-Content "swarm/config.yaml" -ErrorAction SilentlyContinue)) {
-    if ($line -match "spreadsheet_id:" -and $line -notmatch 'spreadsheet_id:\s*""') {
-        $sid = ($line -split "spreadsheet_id:")[1].Trim().Trim('"').Trim("'")
-        if ($sid) { $watcherArgs[3] = $sid }
+foreach ($cfgLine in (Get-Content "swarm/config.yaml" -ErrorAction SilentlyContinue)) {
+    if ($cfgLine.Contains("spreadsheet_id:")) {
+        $sid = $cfgLine.Split(":")[1].Trim().Trim('"').Trim("'")
+        if ($sid -and $sid.Length -gt 0) { $watcherArgs[3] = $sid }
     }
 }
 $watcherPath = Join-Path $ScriptDir "watcher.ps1"
