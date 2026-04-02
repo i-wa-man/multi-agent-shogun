@@ -297,3 +297,15 @@ Write-Host "    Status    : swarm/status.md" -ForegroundColor Gray
 Write-Host "    Projects  : swarm/projects/" -ForegroundColor Gray
 Write-Host "    Proposals : swarm/skill-proposals/" -ForegroundColor Gray
 Write-Host ""
+
+# ============================================================
+# Launch Commander (interactive, stays in this terminal)
+# ============================================================
+Write-Host "  ==========================================================" -ForegroundColor Cyan
+Write-Host "    Launching Commander..." -ForegroundColor Cyan
+Write-Host "    Talk to the Commander to give instructions to your teams." -ForegroundColor Gray
+Write-Host "    Open new tabs and run 'psmux attach -t <team>' to watch." -ForegroundColor Gray
+Write-Host "  ==========================================================" -ForegroundColor Cyan
+Write-Host ""
+
+claude --model opus --dangerously-skip-permissions -p "Read swarm/commander.md. You are the Commander. Read all team definitions in swarm/teams/ and swarm/config.yaml. Then report ready."
