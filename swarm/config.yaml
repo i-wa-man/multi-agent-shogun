@@ -34,7 +34,7 @@ google:
 
   dashboard:
     enabled: true
-    spreadsheet_id: ""        # ← ここにSpreadsheet IDを貼る（URLの /d/ と /edit の間）
+    spreadsheet_id: "1PoVM0VY0csYio6DuxU0NnL1syDUGEIozVFOXdg_V0q0"        # ← ここにSpreadsheet IDを貼る（URLの /d/ と /edit の間）
     sheets:
       projects: "Projects"    # プロジェクト一覧タブ
       active: "Active"        # アクティブタスクタブ
