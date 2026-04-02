@@ -275,10 +275,11 @@ $watcherArgs = @(
     "",
     "gog"
 )
-$configContent = Get-Content "swarm/config.yaml" -Raw -ErrorAction SilentlyContinue
-$pattern = "spreadsheet_id:\s*`"([^`"]+)`""
-if ($configContent -match $pattern) {
-    $watcherArgs[3] = $Matches[1]
+foreach ($line in (Get-Content "swarm/config.yaml" -ErrorAction SilentlyContinue)) {
+    if ($line -match "spreadsheet_id:" -and $line -notmatch 'spreadsheet_id:\s*""') {
+        $sid = ($line -split "spreadsheet_id:")[1].Trim().Trim('"').Trim("'")
+        if ($sid) { $watcherArgs[3] = $sid }
+    }
 }
 $watcherPath = Join-Path $ScriptDir "watcher.ps1"
 $watcher = Start-Job -FilePath $watcherPath -ArgumentList $watcherArgs
