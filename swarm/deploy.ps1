@@ -38,7 +38,6 @@ Set-Location "$ScriptDir\.."
 $WorkersPerTeam = 5
 $RouterModel = "opus"
 $WorkerModel = if ($Battle) { "opus" } else { "sonnet" }
-$RouterThinkingPrefix = if ($Battle) { "" } else { "MAX_THINKING_TOKENS=0 " }
 $FormationLabel = if ($Battle) { "BATTLE (All Opus)" } else { "Default (Router:Opus / Workers:Sonnet)" }
 
 # ============================================================
@@ -204,7 +203,7 @@ foreach ($teamName in $Teams) {
     # Launch Claude Code (unless -SetupOnly)
     if (-not $SetupOnly) {
         # Router (pane 0)
-        psmux send-keys -t "$($session):team.0" "$($RouterThinkingPrefix)claude --model $RouterModel --dangerously-skip-permissions"
+        psmux send-keys -t "$($session):team.0" "claude --model $RouterModel --dangerously-skip-permissions"
         psmux send-keys -t "$($session):team.0" Enter
 
         Start-Sleep -Seconds 2
