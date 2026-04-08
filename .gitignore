@@ -44,3 +44,13 @@ projects/
 # Internal docs (operation logs, test plans, article drafts)
 docs/
 archive/
+
+# Swarm runtime data (generated during operation)
+swarm/boards/
+swarm/results/
+swarm/handoffs/
+swarm/status/
+swarm/skill-proposals/
+swarm/projects/
+!swarm/projects/_template.yaml
+swarm/logs/
